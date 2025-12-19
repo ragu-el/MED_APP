@@ -1,110 +1,68 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.pipeline import Pipeline
-from sklearn.linear_model import LinearRegression, Ridge, Lasso
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.svm import SVR
-from sklearn.metrics import mean_absolute_error, r2_score
+﻿import streamlit as st
+import requests
+import os
 
-# Title
-st.title("💰 Medical Insurance Cost Estimator")
-st.write("Select a model and enter your details to estimate insurance charges.")
+st.title("🏥 Health Insurance Charges Prediction")
 
-# Load dataset
-@st.cache_data
-def load_data():
-    return pd.read_csv("C:/Users/Ragu/medical_insurance/medical_insurance.csv")
+# Use environment variable for API URL
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 
-df = load_data()
+# Sidebar model choice
+st.sidebar.header("Model Selection")
+model_choice = st.sidebar.selectbox(
+    "Choose a model",
+    ["Linear Regression", "Random Forest", "Decision Tree", "Gradient Boosting"]
+)
 
-# Features and target
-X = df.drop("charges", axis=1)
-y = df["charges"]
+st.sidebar.info(f"API: {API_URL}")
 
-# Preprocessing
-categorical = ["sex", "smoker", "region"]
-numerical = ["age", "bmi", "children"]
+# User inputs
+st.header("Enter Your Information")
 
-preprocessor = ColumnTransformer([
-    ("num", StandardScaler(), numerical),
-    ("cat", OneHotEncoder(drop="first"), categorical)
-])
+col1, col2 = st.columns(2)
 
-# Model options
-model_options = {
-    "Linear Regression": LinearRegression(),
-    "Ridge Regression": Ridge(),
-    "Lasso Regression": Lasso(),
-    "Decision Tree": DecisionTreeRegressor(),
-    "Random Forest": RandomForestRegressor(),
-    "Gradient Boosting": GradientBoostingRegressor(),
-    "Support Vector Regressor": SVR()
-}
+with col1:
+    age = st.number_input("Age", min_value=18, max_value=100, value=30)
+    sex = st.selectbox("Sex", ["male", "female"])
+    bmi = st.number_input("BMI", min_value=10.0, max_value=60.0, value=25.0)
 
-# Model selector
-selected_model_name = st.selectbox("Choose a regression model", list(model_options.keys()))
-selected_model = model_options[selected_model_name]
+with col2:
+    children = st.number_input("Children", min_value=0, max_value=5, value=0)
+    smoker = st.selectbox("Smoker", ["yes", "no"])
+    region = st.selectbox("Region", ["northeast", "northwest", "southeast", "southwest"])
 
-# Build pipeline
-pipeline = Pipeline([
-    ("prep", preprocessor),
-    ("model", selected_model)
-])
-
-# Train model
-pipeline.fit(X, y)
-
-# User input
-st.subheader("📋 Your Information")
-age = st.slider("Age", 18, 64, 30)
-sex = st.selectbox("Gender", ["male", "female"])
-bmi = st.number_input("BMI", min_value=10.0, max_value=60.0, value=25.0)
-children = st.slider("Number of Children", 0, 5, 0)
-smoker = st.selectbox("Smoker", ["yes", "no"])
-region = st.selectbox("Region", ["northeast", "northwest", "southeast", "southwest"])
-
-# Prediction
-user_input = pd.DataFrame([{
-    "age": age,
-    "sex": sex,
-    "bmi": bmi,
-    "children": children,
-    "smoker": smoker,
-    "region": region
-}])
-
-if st.button("Estimate Cost"):
-    prediction = pipeline.predict(user_input)
-    st.success(f"Estimated Insurance Cost using {selected_model_name}: ₹{prediction[0]:,.2f}")
-
-
-def get_model_scores(model):
-    pipeline = Pipeline([
-        ("prep", preprocessor),
-        ("model", model)
-    ])
-    pipeline.fit(X, y)
-    preds = pipeline.predict(X)
-    return {
-        "MAE": mean_absolute_error(y, preds),
-        "R²": r2_score(y, preds)
+# Call FastAPI
+if st.button("🔮 Predict Charges", type="primary"):
+    payload = {
+        "age": age,
+        "sex": sex,
+        "bmi": bmi,
+        "children": children,
+        "smoker": smoker,
+        "region": region,
+        "model_choice": model_choice
     }
-
-if st.checkbox("📈 Show model performance on full dataset"):
-    st.subheader("Model Performance Comparison")
-    for name, model in model_options.items():
-        scores = get_model_scores(model)
-        st.write(f"**{name}** → MAE: ₹{scores['MAE']:.2f}, R²: {scores['R²']:.4f}")
-
-if hasattr(selected_model, "feature_importances_"):
-    import matplotlib.pyplot as plt
-    importances = selected_model.feature_importances_
-    feature_names = preprocessor.get_feature_names_out()
-    sorted_idx = np.argsort(importances)[::-1]
-
-    st.subheader("🔍 Feature Importance")
-    st.bar_chart(pd.Series(importances[sorted_idx], index=feature_names[sorted_idx]))
+    
+    with st.spinner("Calculating prediction..."):
+        try:
+            response = requests.post(f"{API_URL}/predict", json=payload, timeout=10)
+            response.raise_for_status()
+            result = response.json()
+            
+            st.success("✅ Prediction Complete!")
+            st.metric(
+                label="Predicted Insurance Charges",
+                value=f"${result['predicted_charges']:,.2f}",
+                delta=None
+            )
+            
+            st.info(f"Model used: **{model_choice}**")
+            
+        except requests.exceptions.ConnectionError:
+            st.error(f"❌ Could not connect to API at {API_URL}. Make sure the FastAPI backend is running.")
+        except requests.exceptions.Timeout:
+            st.error("⏱️ Request timed out. Please try again.")
+        except requests.exceptions.HTTPError as e:
+            st.error(f"❌ HTTP Error: {e}")
+        except Exception as e:
+            st.error(f"❌ Error: {str(e)}")
