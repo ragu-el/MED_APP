@@ -1,0 +1,30 @@
+﻿version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: medical-insurance-backend
+    ports:
+      - "8000:8000"
+    command: uvicorn backend:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  frontend:
+    build: .
+    container_name: medical-insurance-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://backend:8000
+    command: streamlit run med_app.py --server.port=8501 --server.address=0.0.0.0
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
